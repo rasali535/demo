@@ -209,3 +209,19 @@ test_plan:
 agent_communication:
   - agent: "main"
     message: "MVP complete. All 4 scope-of-work areas shipped: (1) AI Billing with real token tracking + mocked Orange Money, (2) Content rendering with react-markdown+remark-gfm tables/links, (3) Admin analytics dashboard + GA4, (4) SEO sitemap/robots/canonical/JSON-LD. Manual curl testing passed for auth, diagnose (real Claude call, 158/555 tokens, BWP 0.29 debited), topup flow (pending->success), admin analytics, sitemap.xml, robots.txt, and blog detail SSR with schema.org markup."
+  - agent: "main"
+    message: "Enhancement v2 added: (a) Multi-language i18n (English/Setswana/French) with full UI translation across nav, hero, diagnose, wallet, courses, blog, admin, footer, dialogs — language switcher in header, persisted to localStorage. (b) Course video player with HTML5 <video>, lecture sidebar with progress, watch tracking persisted in DB, auto-completion on 100%. (c) Certificate PDF download via jsPDF with elegant landscape template (border, mAgri branding, name, course, date, cert ID), supports all 3 languages. Verified: enrollment ladder 0% → 20% → 40% → 60% → 80% → 100% (auto certificate generated). Frontend screenshot confirmed FR + TN render correctly."
+
+enhancement_v2:
+  - task: "Multi-language i18n (EN/TN/FR)"
+    file: "/app/lib/i18n.js + /app/app/page.js"
+    working: true
+    notes: "150+ strings translated. Setswana includes Botswana-specific terms (Pula, Setifikeite, Tlhatlhobo). Language persists via localStorage. Switcher in header dropdown."
+  - task: "Course video player + watch tracking"
+    file: "/app/app/page.js (CourseDetailView) + /app/app/api/[[...path]]/route.js (POST /courses/watch)"
+    working: true
+    notes: "HTML5 video tag with sample MP4s from googleapis. Lecture sidebar with completion icons. Progress bar updates. Auto-marks completed at 100%."
+  - task: "Certificate PDF download (jsPDF)"
+    file: "/app/app/page.js (downloadCert in CourseDetailView)"
+    working: true
+    notes: "Landscape A4, double border, mAgri branding, user name underlined, course title (multi-line), localized date, cert UUID, Brastorne issuer line. Triggered after course completion."

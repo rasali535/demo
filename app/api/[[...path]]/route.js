@@ -130,6 +130,21 @@ async function ensureSeeded(db) {
   ];
   await db.collection('blogs').insertMany(blogs);
 
+  // Sample free MP4 videos used for demo lectures
+  const SAMPLE_VIDEOS = [
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+  ];
+  const buildLectures = (titles) => titles.map((t, i) => ({
+    _id: uuidv4(),
+    title: t,
+    video_url: SAMPLE_VIDEOS[i % SAMPLE_VIDEOS.length],
+    duration_sec: 180 + (i * 30) % 600,
+    order: i + 1,
+  }));
   const courses = [
     {
       _id: uuidv4(),
@@ -138,8 +153,14 @@ async function ensureSeeded(db) {
       excerpt: 'A practical course teaching Botswana poultry farmers how to mix affordable, nutritious feed using local ingredients.',
       thumbnail: 'https://images.unsplash.com/photo-1646451353399-e7c0ac1d9da4?auto=format&fit=crop&w=1200&q=80',
       duration_min: 55,
-      lectures: 16,
       level: 'Beginner',
+      lectures: buildLectures([
+        'Introduction to Poultry Nutrition',
+        'Local Ingredients & Their Nutritional Value',
+        'Calculating Energy & Protein Requirements',
+        'Mixing Ratios for Layers vs Broilers',
+        'Storing & Preserving Mixed Feed',
+      ]),
       created_at: now,
     },
     {
@@ -149,8 +170,14 @@ async function ensureSeeded(db) {
       excerpt: 'A step-by-step guide to plan, finance, operate, and grow a profitable and resilient farm business.',
       thumbnail: 'https://images.unsplash.com/photo-1579336013770-20af0d433bed?auto=format&fit=crop&w=1200&q=80',
       duration_min: 50,
-      lectures: 16,
       level: 'Intermediate',
+      lectures: buildLectures([
+        'Why a Business Plan Matters',
+        'Vision, Mission & Market Analysis',
+        'Cost Structure & Break-Even Analysis',
+        'Funding via Thuo Letlotlo & Banks',
+        'Risk Management & Resilience',
+      ]),
       created_at: now,
     },
     {
@@ -160,8 +187,14 @@ async function ensureSeeded(db) {
       excerpt: 'Learn to make high-quality compost, produce biofertilizers, and apply sustainable soil fertility practices.',
       thumbnail: 'https://images.unsplash.com/photo-1704627647734-61e38adedc4d?auto=format&fit=crop&w=1200&q=80',
       duration_min: 48,
-      lectures: 16,
       level: 'Beginner',
+      lectures: buildLectures([
+        'Compost Science Basics',
+        'Selecting Local Inputs',
+        'Building Your Compost Pile',
+        'Biofertilizer Production',
+        'Application Rates & Timing',
+      ]),
       created_at: now,
     },
   ];
@@ -293,6 +326,41 @@ async function handle(request, { params }) {
   }
 
   // ---- Course enrollment + completion ----
+  if (method === 'GET' && route.startsWith('/courses/by-id/')) {
+    const id = route.replace('/courses/by-id/', '');
+    const course = await db.collection('courses').findOne({ _id: id });
+    if (!course) return err('not found', 404);
+    return json({ course });
+  }
+  if (method === 'POST' && route === '/courses/watch') {
+    const user = await getUserFromCookie();
+    if (!user) return err('auth required', 401);
+    const { course_id, lecture_id } = await request.json();
+    const course = await db.collection('courses').findOne({ _id: course_id });
+    if (!course) return err('course not found', 404);
+    const total = (course.lectures || []).length || 1;
+    const enr = await db.collection('enrollments').findOne({ user_id: user._id, course_id });
+    const watched = new Set(enr?.watched_lectures || []);
+    watched.add(lecture_id);
+    const watchedArr = Array.from(watched);
+    const progress = Math.round((watchedArr.length / total) * 100);
+    const isComplete = progress >= 100;
+    const update = {
+      $set: {
+        watched_lectures: watchedArr,
+        progress,
+        last_watched_at: new Date(),
+      },
+      $setOnInsert: { _id: uuidv4(), user_id: user._id, course_id, enrolled_at: new Date() },
+    };
+    if (isComplete && !enr?.completed_at) {
+      update.$set.completed_at = new Date();
+      update.$set.certificate_id = uuidv4();
+    }
+    await db.collection('enrollments').updateOne({ user_id: user._id, course_id }, update, { upsert: true });
+    const fresh = await db.collection('enrollments').findOne({ user_id: user._id, course_id });
+    return json({ enrollment: fresh });
+  }
   if (method === 'POST' && route === '/courses/enroll') {
     const user = await getUserFromCookie();
     if (!user) return err('auth required', 401);
