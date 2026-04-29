@@ -285,16 +285,41 @@ async function ensureSeeded(db) {
 
 // ============ ROUTER ============
 async function handle(request, { params }) {
-  const db = await getDb();
-  await ensureSeeded(db);
-
   const p = Array.isArray(params?.path) ? params.path : [];
   const route = '/' + p.join('/');
   const method = request.method;
 
-  // ---- Health ----
+  // ---- Diagnostic endpoints (do NOT touch the DB) ----
   if (method === 'GET' && route === '/health') {
     return json({ ok: true, service: 'mAgri', time: new Date().toISOString() });
+  }
+  if (method === 'GET' && route === '/diag') {
+    const env = {
+      MONGO_URL_set: !!process.env.MONGO_URL,
+      MONGO_URL_prefix: process.env.MONGO_URL ? process.env.MONGO_URL.slice(0, 25) + '…' : null,
+      DB_NAME: process.env.DB_NAME || null,
+      EMERGENT_LLM_KEY_set: !!process.env.EMERGENT_LLM_KEY,
+      NEXT_PUBLIC_BASE_URL: process.env.NEXT_PUBLIC_BASE_URL || null,
+      NODE_VERSION: process.version,
+    };
+    let dbStatus = { connected: false };
+    try {
+      const db = await getDb();
+      const ping = await db.command({ ping: 1 });
+      dbStatus = { connected: true, ping };
+    } catch (e) {
+      dbStatus = { connected: false, error: e.message };
+    }
+    return json({ env, db: dbStatus });
+  }
+
+  // ---- All other routes need the DB ----
+  let db;
+  try {
+    db = await getDb();
+    await ensureSeeded(db);
+  } catch (e) {
+    return err('Database not reachable. Visit /api/diag for details.', 500, { detail: e.message });
   }
 
   // ---- Auth ----
