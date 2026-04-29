@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getDb } from '@/lib/mongo';
 import { v4 as uuidv4 } from 'uuid';
-import { spawn } from 'child_process';
-import path from 'path';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -58,29 +56,74 @@ function computeCostBWP(inputTokens, outputTokens) {
 }
 
 function callPythonLLM(payload) {
-  return new Promise((resolve, reject) => {
-    const scriptPath = path.join(process.cwd(), 'lib', 'llm_helper.py');
-    const env = { ...process.env };
-    const pyBin = process.env.PYTHON_BIN || '/root/.venv/bin/python3';
-    const child = spawn(pyBin, [scriptPath], { env });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', d => (stdout += d.toString()));
-    child.stderr.on('data', d => (stderr += d.toString()));
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (stdout) {
-        try {
-          const parsed = JSON.parse(stdout);
-          return resolve(parsed);
-        } catch (e) {
-          return reject(new Error('Invalid JSON from LLM helper: ' + stdout.slice(0, 500)));
+  // Now a pure-Node call to Emergent's OpenAI-compatible LLM proxy.
+  // No Python required — works on any Node host (Hostinger, Vercel, Render, etc.).
+  return new Promise(async (resolve) => {
+    try {
+      const apiKey = payload.api_key || process.env.EMERGENT_LLM_KEY;
+      const provider = payload.provider || 'anthropic';
+      const model = payload.model || 'claude-sonnet-4-5-20250929';
+      const baseUrl = process.env.LLM_BASE_URL || 'https://integrations.emergentagent.com/llm/v1';
+      const sysMsg = payload.system_message || 'You are a helpful assistant.';
+      const history = payload.history || [];
+      const text = payload.text || '';
+      const imageB64 = payload.image_base64 || null;
+
+      const messages = [{ role: 'system', content: sysMsg }];
+      for (const m of history) {
+        if (m.role === 'user' || m.role === 'assistant') {
+          messages.push({ role: m.role, content: m.content });
         }
       }
-      reject(new Error(`LLM helper exited ${code}: ${stderr}`));
-    });
-    child.stdin.write(JSON.stringify(payload));
-    child.stdin.end();
+      // Build current user message (multimodal if image)
+      if (imageB64) {
+        let dataUrl = imageB64;
+        if (!dataUrl.startsWith('data:')) {
+          // sniff mime via base64 prefix
+          let mime = 'image/png';
+          if (dataUrl.startsWith('/9j/')) mime = 'image/jpeg';
+          else if (dataUrl.startsWith('iVBOR')) mime = 'image/png';
+          else if (dataUrl.startsWith('UklGR')) mime = 'image/webp';
+          dataUrl = `data:${mime};base64,${dataUrl}`;
+        }
+        messages.push({
+          role: 'user',
+          content: [
+            { type: 'text', text: text || 'Please analyze this image.' },
+            { type: 'image_url', image_url: { url: dataUrl } },
+          ],
+        });
+      } else {
+        messages.push({ role: 'user', content: text });
+      }
+
+      const res = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ model, messages }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return resolve({ ok: false, error: `LLM HTTP ${res.status}: ${JSON.stringify(data).slice(0, 400)}` });
+      }
+      const reply = data?.choices?.[0]?.message?.content || '';
+      const inputTokens = data?.usage?.prompt_tokens || 0;
+      const outputTokens = data?.usage?.completion_tokens || 0;
+      resolve({
+        ok: true,
+        reply: typeof reply === 'string' ? reply : JSON.stringify(reply),
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        total_tokens: inputTokens + outputTokens,
+        model,
+        provider,
+      });
+    } catch (e) {
+      resolve({ ok: false, error: e.message });
+    }
   });
 }
 

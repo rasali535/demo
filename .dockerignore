@@ -1,0 +1,20 @@
+# Build artefacts
+.next
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+.git
+.gitignore
+.env
+.env.local
+.env.development
+# Python helper no longer needed
+lib/llm_helper.py
+*.md
+Dockerfile
+.dockerignore
+tests
+test_result.md
+test_reports
+memory
